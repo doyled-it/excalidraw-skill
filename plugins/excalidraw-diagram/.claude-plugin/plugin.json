@@ -1,0 +1,11 @@
+{
+  "name": "excalidraw-diagram",
+  "version": "0.1.0",
+  "description": "Create editable .excalidraw JSON diagrams that argue visually — with deterministic layout, text measurement, and geometry preflight instead of hand-placed coordinates.",
+  "author": {
+    "name": "Michael Doyle",
+    "url": "https://github.com/doyled-it"
+  },
+  "homepage": "https://github.com/doyled-it/excalidraw-skill",
+  "keywords": ["excalidraw", "diagrams", "architecture", "visualization", "obsidian"]
+}

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #ffffff; overflow: hidden; }
+    #root { display: inline-block; }
+    #root svg { display: block; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    async function loadExcalidrawModule() {
+      const candidates = [
+        "./vendor/excalidraw-bundle.mjs",
+        "https://esm.sh/@excalidraw/excalidraw@0.18.0?bundle&deps=react@18,react-dom@18",
+      ];
+
+      const errors = [];
+      for (const specifier of candidates) {
+        try {
+          const mod = await import(specifier);
+          return { mod, specifier };
+        } catch (error) {
+          errors.push(`${specifier}: ${String(error)}`);
+        }
+      }
+
+      throw new Error(
+        "Unable to load @excalidraw/excalidraw. " +
+        "Tried local vendor bundle and CDN import.\n" +
+        errors.join("\n"),
+      );
+    }
+
+    let exportToSvg;
+    try {
+      const loaded = await loadExcalidrawModule();
+      exportToSvg = loaded.mod.exportToSvg;
+      window.__moduleReady = true;
+      window.__moduleSource = loaded.specifier;
+    } catch (error) {
+      console.error(error);
+      window.__moduleReady = false;
+      window.__moduleError = String(error);
+    }
+
+    window.renderDiagram = async function(jsonData) {
+      try {
+        if (!exportToSvg) {
+          throw new Error(window.__moduleError || "Excalidraw module did not load");
+        }
+
+        const data = typeof jsonData === "string" ? JSON.parse(jsonData) : jsonData;
+        const elements = data.elements || [];
+        const appState = data.appState || {};
+        const files = data.files || {};
+
+        appState.viewBackgroundColor = appState.viewBackgroundColor || "#ffffff";
+        appState.exportWithDarkMode = false;
+
+        const svg = await exportToSvg({
+          elements,
+          appState: {
+            ...appState,
+            exportBackground: true,
+          },
+          files,
+        });
+
+        // Let rendered text extend beyond the initial viewBox so we can
+        // measure the actual post-font-load bounds before finalizing output.
+        svg.setAttribute("overflow", "visible");
+
+        const root = document.getElementById("root");
+        root.innerHTML = "";
+        root.appendChild(svg);
+
+        await document.fonts.ready;
+
+        const ctm = svg.getScreenCTM();
+        const viewBoxAttribute = svg.getAttribute("viewBox");
+        if (ctm && viewBoxAttribute) {
+          const [origX, origY, origWidth, origHeight] = viewBoxAttribute.split(" ").map(Number);
+          const inverseCtm = ctm.inverse();
+
+          let pxMinX = Infinity;
+          let pxMinY = Infinity;
+          let pxMaxX = -Infinity;
+          let pxMaxY = -Infinity;
+
+          for (const element of svg.querySelectorAll("*")) {
+            const rect = element.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) {
+              continue;
+            }
+            pxMinX = Math.min(pxMinX, rect.left);
+            pxMinY = Math.min(pxMinY, rect.top);
+            pxMaxX = Math.max(pxMaxX, rect.right);
+            pxMaxY = Math.max(pxMaxY, rect.bottom);
+          }
+
+          if (pxMinX !== Infinity) {
+            const svgMin = new DOMPoint(pxMinX, pxMinY).matrixTransform(inverseCtm);
+            const svgMax = new DOMPoint(pxMaxX, pxMaxY).matrixTransform(inverseCtm);
+            const padding = 40;
+
+            const nextX = Math.min(origX, svgMin.x) - padding;
+            const nextY = Math.min(origY, svgMin.y) - padding;
+            const nextMaxX = Math.max(origX + origWidth, svgMax.x) + padding;
+            const nextMaxY = Math.max(origY + origHeight, svgMax.y) + padding;
+            const nextWidth = nextMaxX - nextX;
+            const nextHeight = nextMaxY - nextY;
+
+            const pixelPerUnit = parseFloat(svg.getAttribute("width")) / origWidth;
+            svg.setAttribute("viewBox", `${nextX} ${nextY} ${nextWidth} ${nextHeight}`);
+            svg.setAttribute("width", String(nextWidth * pixelPerUnit));
+            svg.setAttribute("height", String(nextHeight * pixelPerUnit));
+          }
+        }
+
+        svg.removeAttribute("overflow");
+        window.__renderComplete = true;
+        return {
+          success: true,
+          width: svg.getAttribute("width"),
+          height: svg.getAttribute("height"),
+        };
+      } catch (error) {
+        console.error(error);
+        return { success: false, error: String(error) };
+      }
+    };
+  </script>
+</body>
+</html>

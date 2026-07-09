@@ -1,0 +1,14 @@
+{
+  "name": "doyled-it-diagrams",
+  "owner": {
+    "name": "Michael Doyle",
+    "url": "https://github.com/doyled-it"
+  },
+  "plugins": [
+    {
+      "name": "excalidraw-diagram",
+      "source": "./plugins/excalidraw-diagram",
+      "description": "Create editable .excalidraw JSON diagrams that argue visually — with deterministic layout, text measurement, and geometry preflight instead of hand-placed coordinates."
+    }
+  ]
+}
