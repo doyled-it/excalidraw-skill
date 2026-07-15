@@ -34,6 +34,8 @@ Use these as starting points when building `.excalidraw` files. Replace placehol
 
 ## Text
 
+`width`/`height` are not free parameters — derive them from measured text (`measure_text_bounds.py` → `reqWidth`/`reqHeight`), and set the parent box to match. `text` and `originalText` hold the same **natural, unwrapped** string; do not insert `\n` to force line breaks (let wrapping decide them). See "Text Sizing and Wrapping" in SKILL.md.
+
 ```json
 {
   "type": "text",
@@ -161,3 +163,52 @@ Use these as starting points when building `.excalidraw` files. Replace placehol
   "locked": false
 }
 ```
+
+## Grouped Cluster
+
+A panel and everything inside it share a `groupIds` entry so the whole cluster moves as one unit (and can be ungrouped in-app for manual fixes). Elements sharing a group id are grouped; nested groups append ids outer-last so every descendant carries the outer id.
+
+```json
+[
+  {
+    "type": "rectangle",
+    "id": "section",
+    "x": 80,
+    "y": 80,
+    "width": 360,
+    "height": 220,
+    "groupIds": ["section-cluster"],
+    "roughness": 0,
+    "boundElements": [{ "id": "section_title", "type": "text" }]
+  },
+  {
+    "type": "text",
+    "id": "section_title",
+    "x": 96,
+    "y": 92,
+    "width": 200,
+    "height": 25,
+    "text": "Ingest",
+    "originalText": "Ingest",
+    "fontSize": 16,
+    "fontFamily": 2,
+    "roughness": 0,
+    "containerId": "section",
+    "groupIds": ["section-cluster"]
+  },
+  {
+    "type": "rectangle",
+    "id": "step_parse",
+    "x": 110,
+    "y": 150,
+    "width": 140,
+    "height": 60,
+    "groupIds": ["section-cluster"],
+    "roughness": 0
+  }
+]
+```
+
+Notes:
+- The panel (`section`), its bound title, and the inner box (`step_parse`) all carry `"section-cluster"`, so dragging any one moves the whole group.
+- For a section nested inside a larger background, the inner elements would read `"groupIds": ["step-subgroup", "section-cluster", "background"]` — innermost first, outermost last.

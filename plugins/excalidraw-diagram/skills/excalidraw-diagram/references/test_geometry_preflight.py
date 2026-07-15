@@ -99,6 +99,81 @@ class GeometryPreflightTests(unittest.TestCase):
 
         self.assertIn(("card_title", "card", "text_crosses_divider"), issues)
 
+    def test_inferred_overflow_flags_free_floating_text_wider_than_box(self) -> None:
+        # Free-floating text (no containerId) sitting inside a box, but the text
+        # is far wider than the box interior -> it visibly runs over the box.
+        elements = [
+            {
+                "id": "box",
+                "type": "rectangle",
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 80,
+            },
+            {
+                "id": "label",
+                "type": "text",
+                "x": 10,
+                "y": 30,
+                "width": 100,
+                "height": 20,
+                "text": "This label is far too long to ever fit inside that little box",
+                "fontSize": 16,
+                "fontFamily": 3,
+                "lineHeight": 1.25,
+            },
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        overflow_containers = {item["containerId"] for item in report["text_overflows"]}
+        self.assertIn("box", overflow_containers)
+
+    def test_oversized_container_flagged_for_empty_space(self) -> None:
+        # A leaf content box far larger than the tiny text it holds -> wasted space.
+        elements = [
+            {
+                "id": "roomy",
+                "type": "rectangle",
+                "x": 0,
+                "y": 0,
+                "width": 420,
+                "height": 320,
+            },
+            {
+                "id": "tiny",
+                "type": "text",
+                "x": 20,
+                "y": 20,
+                "width": 60,
+                "height": 20,
+                "text": "Hi",
+                "fontSize": 16,
+                "fontFamily": 3,
+                "lineHeight": 1.25,
+                "containerId": "roomy",
+            },
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        oversized = {item["containerId"] for item in report["oversized_containers"]}
+        self.assertIn("roomy", oversized)
+
+    def test_grouping_issue_flagged_for_ungrouped_cluster(self) -> None:
+        elements = [
+            {"id": "panel", "type": "rectangle", "x": 0, "y": 0, "width": 300, "height": 200, "groupIds": []},
+            {"id": "inner", "type": "rectangle", "x": 20, "y": 20, "width": 100, "height": 50, "groupIds": []},
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        panels = {item["containerId"] for item in report["grouping_issues"]}
+        self.assertIn("panel", panels)
+
+    def test_grouped_cluster_is_clean(self) -> None:
+        elements = [
+            {"id": "panel", "type": "rectangle", "x": 0, "y": 0, "width": 300, "height": 200, "groupIds": ["g1"]},
+            {"id": "inner", "type": "rectangle", "x": 20, "y": 20, "width": 100, "height": 50, "groupIds": ["g1"]},
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        self.assertEqual(report["grouping_issues"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

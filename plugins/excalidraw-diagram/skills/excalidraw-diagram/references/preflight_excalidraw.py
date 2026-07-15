@@ -43,6 +43,8 @@ def main() -> None:
         + len(report.get("zone_issues", []))
         + len(report["overlaps"])
         + len(report["arrow_issues"])
+        + len(report.get("oversized_containers", []))
+        + len(report.get("grouping_issues", []))
     )
 
     if args.json:
@@ -81,6 +83,14 @@ def main() -> None:
             print(
                 f"  arrow: id={item['arrowId']} issue={item['issue']} detail={item['detail']}"
             )
+
+        print(f"oversized_containers={len(report.get('oversized_containers', []))}")
+        for item in report.get("oversized_containers", []):
+            print(f"  oversized: container={item['containerId']} detail={item['detail']}")
+
+        print(f"grouping_issues={len(report.get('grouping_issues', []))}")
+        for item in report.get("grouping_issues", []):
+            print(f"  grouping: container={item['containerId']} detail={item['detail']}")
 
     if args.fail_on_issues and issue_count:
         sys.exit(2)

@@ -798,6 +798,13 @@ def _point_within_expanded_rect(point: Point, rect: Rect, margin: float = 6.0) -
     )
 
 
+def _group_ids(element: dict) -> set[str]:
+    group_ids = element.get("groupIds")
+    if not isinstance(group_ids, list):
+        return set()
+    return {group_id for group_id in group_ids if isinstance(group_id, str)}
+
+
 def analyze_excalidraw(
     elements: Sequence[dict],
     *,
@@ -1141,10 +1148,138 @@ def analyze_excalidraw(
                         }
                     )
 
+    # Overflow for geometrically-owned (free-floating) text, not only explicitly
+    # bound text. This is what catches a label whose box is smaller than the text,
+    # so the text visibly runs over the box it is meant to sit inside.
+    for text_id, owner_id in text_owner.items():
+        element = text_elements.get(text_id)
+        if element is None or element.get("containerId"):
+            continue  # explicit-container overflow already handled above
+        owner = by_id.get(owner_id)
+        owner_rect = _element_rect(owner) if owner else None
+        measurement = _measure_text_element(element)
+        if owner_rect is None or measurement is None:
+            continue
+        inner_width = owner_rect.width - (padding_x * 2)
+        inner_height = owner_rect.height - (padding_y * 2)
+        if measurement.text_width > inner_width or measurement.text_height > inner_height:
+            text_overflows.append(
+                {
+                    "textId": text_id,
+                    "containerId": owner_id,
+                    "textWidth": measurement.text_width,
+                    "textHeight": measurement.text_height,
+                    "availableWidth": inner_width,
+                    "availableHeight": inner_height,
+                    "text": element.get("text", ""),
+                    "inferred": True,
+                }
+            )
+
+    # Oversized containers: a leaf content box far larger than the text it holds
+    # reads as wasted empty space. Panels that enclose child shapes are skipped —
+    # their whitespace is structural, not accidental.
+    shape_rects: dict[str, Rect] = {}
+    for element in elements:
+        if element.get("isDeleted") or element.get("type") not in {"rectangle", "ellipse", "diamond"}:
+            continue
+        element_id = element.get("id")
+        rect = _element_rect(element)
+        if isinstance(element_id, str) and rect is not None:
+            shape_rects[element_id] = rect
+
+    def _encloses_shape(container_id: str, container_rect: Rect) -> bool:
+        for other_id, other_rect in shape_rects.items():
+            if other_id == container_id:
+                continue
+            if _contains(container_rect, other_rect, margin=0):
+                return True
+        return False
+
+    oversized_containers: list[dict] = []
+    for container_id, container in inferred_containers.items():
+        if not container.owned_text_ids or _encloses_shape(container_id, container.rect):
+            continue
+        total_text_height = 0
+        max_text_width = 0
+        for text_id in container.owned_text_ids:
+            measurement = _measure_text_element(text_elements.get(text_id, {}))
+            if measurement is None:
+                continue
+            total_text_height += measurement.text_height
+            max_text_width = max(max_text_width, measurement.text_width)
+        if total_text_height == 0:
+            continue
+        required_width = max_text_width + (padding_x * 2)
+        required_height = total_text_height + (padding_y * 2)
+        container_area = container.rect.width * container.rect.height
+        required_area = max(required_width * required_height, 1)
+        excess_height = container.rect.height - required_height
+        excess_width = container.rect.width - required_width
+        if container_area >= required_area * 2.5 and (excess_height >= 60 or excess_width >= 160):
+            oversized_containers.append(
+                {
+                    "containerId": container_id,
+                    "containerWidth": round(container.rect.width),
+                    "containerHeight": round(container.rect.height),
+                    "requiredWidth": required_width,
+                    "requiredHeight": required_height,
+                    "detail": (
+                        f"Container '{container_id}' is {round(container.rect.width)}x{round(container.rect.height)} "
+                        f"but its text needs only ~{required_width}x{required_height}; shrink the box or the empty space reads as a mistake."
+                    ),
+                }
+            )
+
+    # Grouping: a panel that encloses child boxes or free-floating labels should
+    # share a groupId with them so the whole cluster drags as one unit.
+    grouping_issues: list[dict] = []
+    for panel in elements:
+        if panel.get("isDeleted") or panel.get("type") not in {"rectangle", "ellipse", "diamond"}:
+            continue
+        panel_id = panel.get("id")
+        panel_rect = shape_rects.get(panel_id) if isinstance(panel_id, str) else None
+        if panel_rect is None:
+            continue
+        children: list[dict] = []
+        for other in elements:
+            other_id = other.get("id")
+            if not isinstance(other_id, str) or other_id == panel_id or other.get("isDeleted"):
+                continue
+            if other.get("type") not in {"rectangle", "ellipse", "diamond", "text"}:
+                continue
+            # A label bound to this panel already moves with it — not a grouping gap.
+            if other.get("type") == "text" and other.get("containerId") == panel_id:
+                continue
+            other_rect = _element_rect(other)
+            if other_rect is None:
+                continue
+            if _contains(panel_rect, other_rect, margin=0):
+                children.append(other)
+        if not children:
+            continue
+        shared = _group_ids(panel)
+        for child in children:
+            shared &= _group_ids(child)
+        if not shared:
+            grouping_issues.append(
+                {
+                    "containerId": panel_id,
+                    "childIds": sorted(child.get("id") for child in children),
+                    "childCount": len(children),
+                    "detail": (
+                        f"Panel '{panel_id}' encloses {len(children)} element(s) but shares no groupId with them; "
+                        f"assign a common groupId so the cluster drags as a unit."
+                    ),
+                }
+            )
+
     return {
         "text_overflows": text_overflows,
         "text_collisions": text_collisions,
         "zone_issues": zone_issues,
         "overlaps": overlaps,
         "arrow_issues": arrow_issues,
+        "oversized_containers": oversized_containers,
+        "grouping_issues": grouping_issues,
     }

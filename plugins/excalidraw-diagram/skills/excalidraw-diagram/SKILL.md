@@ -141,7 +141,9 @@ Repository hygiene rule:
 Use the Python helpers in `references/geometry.py` for exact text measurement, wrapping, container sizing, orthogonal routing, and preflight analysis. Use `references/preflight_excalidraw.py` to fail fast on overflow or overlap before rendering.
 
 Minimum validation rules for deterministic mode:
-- Text must fit inside its containing box with padding.
+- Text must fit inside its containing box with padding — for bound AND free-floating text (preflight checks both; see Text Sizing and Wrapping).
+- Boxes must be sized to their text, not far larger (no wasted empty space; preflight flags `oversized_containers`).
+- Panels that enclose child boxes or labels must share a `groupId` with them (preflight flags `grouping_issues`; see Grouping).
 - Text overlap checks must be geometry-based and ownership-aware: derive rendered text bounds using the same font metrics and wrapping model as the renderer, then test those rectangles against foreign shapes, foreign text, and connector lanes.
 - Boxes must not overlap.
 - Box-to-box arrows must have valid bindings on both ends unless the connector is intentionally free-floating and labeled as such.
@@ -225,6 +227,36 @@ Use `textWidth` and `textHeight` for the text element itself.
 
 This is deterministic relative to the local Playwright renderer environment. It is more reliable than heuristic character counting.
 
+## Text Sizing and Wrapping
+
+Size the box to the text; let wrapping decide the line breaks. Do not hand-place line breaks or pad boxes by eye.
+
+The recipe for any text-in-a-box:
+1. Decide the target text width (a column width, or the natural single-line width for short labels).
+2. Measure with `measure_text_bounds.py` / `geometry.size_container_to_text()`, passing that `max_width` so the helper wraps the text for you.
+3. Set the box `width`/`height` to the returned `reqWidth`/`reqHeight` (measured text + one consistent padding, default 12px each side).
+4. Write the natural, unwrapped string into `text` and `originalText`. Let Excalidraw (or the helper's wrap) insert breaks.
+
+Rules:
+- **Never insert manual `\n` to force line breaks in prose.** Widen the box or lower the `max_width` and let the text reflow. A hard `\n` is only acceptable when the break is semantically real (a deliberate two-line title, a code block with real newlines).
+- **The box is sized from the text, not the other way around.** A box far bigger than its text is wasted space; a box smaller than its text overflows and runs over its own borders. Both are preflight failures (`oversized_containers`, `text_overflows`).
+- **One padding value everywhere.** Don't hand-tune per-box padding; consistent padding is what makes boxes look aligned.
+- **`text` and `originalText` hold the same natural string.** For container-bound text, the app re-wraps to the box width on open — a hardcoded `\n` fights that and renders wrong.
+
+Red flags:
+- A `text` value containing `\n` that isn't a genuine paragraph or code newline.
+- A box whose height is more than ~2x the text it holds.
+- Text that visibly extends past the box edge in the render.
+
+## Grouping
+
+Every panel that contains other elements must be grouped with them, so the whole cluster drags as one unit and can be ungrouped if the layout needs manual repair.
+
+- Assign a shared `groupIds` entry to a panel and all boxes, labels, dots, and arrows that live inside it. Elements sharing a group id move together in the Excalidraw app.
+- For nested structure (a section inside a background inside the diagram), append group ids outer-last: `"groupIds": ["cluster-b", "section-2", "background"]`. Every descendant carries the outer ids; the innermost id is first.
+- A label bound to its box via `containerId` already moves with that box — it does not also need a group. Grouping is for the *cluster* level: box-with-sub-boxes, a section panel, a lane and its contents.
+- Preflight flags any panel that encloses child elements without a shared group id (`grouping_issues`). Fix by adding the common id to the panel and each child.
+
 ## Gotchas
 
 Hard-won failure points specific to Excalidraw JSON. Check these before delivering.
@@ -235,7 +267,9 @@ Hard-won failure points specific to Excalidraw JSON. Check these before deliveri
 - **`roughness: 0` is mandatory for a clean look.** The Excalidraw default is 1 (sketchy). Technical diagrams want 0 everywhere.
 - **Text bounds are renderer-specific, not guessable.** Width from character count is wrong (ignores kerning, wrap, line metrics). Always measure with `measure_text_bounds.py`; preflight overlap results are only trustworthy if measured with the SAME font family/size/wrap as the render.
 - **Preflight can pass on a diagram that still reads badly.** Mechanical checks catch overflow/overlap/clipping but not "this arrow needs visual tracing" or inconsistent elbow patterns. A clean preflight is necessary, not sufficient — see Connector Discipline.
-- **`originalText` must mirror `text`** on text elements, or edits in the Excalidraw app behave oddly.
+- **`originalText` must mirror `text`** on text elements, or edits in the Excalidraw app behave oddly. Both hold the natural, unwrapped string — see Text Sizing and Wrapping.
+- **Forcing `\n` to wrap text produces boxes that overflow or waste space.** Size the box to measured text and let wrapping happen; a hard newline only belongs where the break is semantically real. Grep the JSON for `\n` inside prose `text` values before shipping.
+- **A panel with contents but no shared `groupId` won't drag as a unit.** The user has to rubber-band-select every piece. Give the panel and everything inside it a common group id (see Grouping); preflight fails on `grouping_issues` otherwise.
 - **The renderer's Chromium must be the Playwright-managed one.** Wiring it to the full Google Chrome.app can crash headless on macOS before the page loads (see README).
 
 ## Output Expectations

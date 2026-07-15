@@ -30,13 +30,15 @@ All elements share these:
 | `roughness` | number | 0 (smooth), 1 (default), 2 (rough) |
 | `opacity` | number | 0-100 |
 | `seed` | number | Random seed for roughness |
+| `groupIds` | string[] | Shared group membership; elements with a common id move together. Nested groups append ids outer-last. Group panels with their contents (see SKILL.md → Grouping). |
 
 ## Text-Specific Properties
 
 | Property | Description |
 | --- | --- |
-| `text` | The display text |
-| `originalText` | Same as `text` |
+| `text` | The natural, unwrapped string. Do not insert `\n` to force wrapping — size the box and let text reflow (SKILL.md → Text Sizing and Wrapping) |
+| `originalText` | Same natural string as `text`; the app re-wraps bound text to the box width on open |
+| `width`/`height` | Derive from measured text (`measure_text_bounds.py` → `reqWidth`/`reqHeight`), not guessed |
 | `fontSize` | Size in pixels (16-20 recommended) |
 | `fontFamily` | 1 = Virgil/hand-drawn (NEVER use), 2 = Helvetica (titles/labels), 3 = monospace (code/identifiers) |
 | `textAlign` | `"left"`, `"center"`, `"right"` |
