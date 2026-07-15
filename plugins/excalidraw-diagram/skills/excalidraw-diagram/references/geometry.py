@@ -1176,9 +1176,14 @@ def analyze_excalidraw(
                 }
             )
 
-    # Oversized containers: a leaf content box far larger than the text it holds
-    # reads as wasted empty space. Panels that enclose child shapes are skipped —
-    # their whitespace is structural, not accidental.
+    # A container should hug its contents with one consistent padding. Comparing a
+    # container to the bounding box of everything it holds (child shapes + the text
+    # it owns) surfaces two opposite defects:
+    #   - oversized: a large gutter of empty space beyond a comfortable padding
+    #     (e.g. a full-width row whose content sits crammed on the left)
+    #   - cramped: content pressed right up against an edge with too little padding
+    # This measures against ALL contents, so panels that enclose child boxes are
+    # checked too — not skipped.
     shape_rects: dict[str, Rect] = {}
     for element in elements:
         if element.get("isDeleted") or element.get("type") not in {"rectangle", "ellipse", "diamond"}:
@@ -1188,45 +1193,120 @@ def analyze_excalidraw(
         if isinstance(element_id, str) and rect is not None:
             shape_rects[element_id] = rect
 
-    def _encloses_shape(container_id: str, container_rect: Rect) -> bool:
-        for other_id, other_rect in shape_rects.items():
-            if other_id == container_id:
-                continue
-            if _contains(container_rect, other_rect, margin=0):
-                return True
-        return False
+    def _text_content_rect(text_id: str) -> Rect | None:
+        element = text_elements.get(text_id)
+        if element is None:
+            return None
+        measurement = _measure_text_element(element)
+        if measurement is None:
+            return None
+        # Measured extent, anchored at the element origin. Conservative for slack:
+        # for centered text this understates the right edge rather than inventing space.
+        return Rect(
+            x=float(element.get("x", 0)),
+            y=float(element.get("y", 0)),
+            width=float(measurement.text_width),
+            height=float(measurement.text_height),
+            id=text_id,
+        )
+
+    # Excess slack (beyond one comfortable padding on each side) that reads as a
+    # gutter, and the minimum padding below which content looks cramped.
+    slack_h_threshold = 120.0
+    slack_v_threshold = 80.0
+    min_padding = 8.0
 
     oversized_containers: list[dict] = []
+    cramped_containers: list[dict] = []
     for container_id, container in inferred_containers.items():
-        if not container.owned_text_ids or _encloses_shape(container_id, container.rect):
-            continue
-        total_text_height = 0
-        max_text_width = 0
-        for text_id in container.owned_text_ids:
-            measurement = _measure_text_element(text_elements.get(text_id, {}))
-            if measurement is None:
+        crect = container.rect
+        content_rects: list[Rect] = []
+        for shape_id, shape_rect in shape_rects.items():
+            if shape_id == container_id:
                 continue
-            total_text_height += measurement.text_height
-            max_text_width = max(max_text_width, measurement.text_width)
-        if total_text_height == 0:
+            if _contains(crect, shape_rect, margin=0):
+                content_rects.append(shape_rect)
+        # cramp_rects excludes text bound to THIS container: a box hugging its own
+        # label is correct, not cramped. Free-floating content and child shapes
+        # pressed against an edge are the real "cramped" signal.
+        cramp_rects: list[Rect] = list(content_rects)
+        for text_id in container.owned_text_ids:
+            element = text_elements.get(text_id, {})
+            explicit_owner = element.get("containerId")
+            # Free-floating text this container owns, or text bound to THIS container,
+            # counts as content. Text bound to a child box is covered by that box's rect.
+            if isinstance(explicit_owner, str) and explicit_owner != container_id:
+                continue
+            rect = _text_content_rect(text_id)
+            if rect is not None:
+                content_rects.append(rect)
+                if explicit_owner != container_id:
+                    cramp_rects.append(rect)
+        if not content_rects:
             continue
-        required_width = max_text_width + (padding_x * 2)
-        required_height = total_text_height + (padding_y * 2)
-        container_area = container.rect.width * container.rect.height
-        required_area = max(required_width * required_height, 1)
-        excess_height = container.rect.height - required_height
-        excess_width = container.rect.width - required_width
-        if container_area >= required_area * 2.5 and (excess_height >= 60 or excess_width >= 160):
+
+        content_left = min(rect.left for rect in content_rects)
+        content_right = max(rect.right for rect in content_rects)
+        content_top = min(rect.top for rect in content_rects)
+        content_bottom = max(rect.bottom for rect in content_rects)
+
+        horizontal_slack = crect.width - (content_right - content_left)
+        vertical_slack = crect.height - (content_bottom - content_top)
+        excess_horizontal = horizontal_slack - (padding_x * 2)
+        excess_vertical = vertical_slack - (padding_y * 2)
+
+        if excess_horizontal >= slack_h_threshold or excess_vertical >= slack_v_threshold:
+            axes = []
+            if excess_horizontal >= slack_h_threshold:
+                axes.append(f"~{round(horizontal_slack)}px horizontal")
+            if excess_vertical >= slack_v_threshold:
+                axes.append(f"~{round(vertical_slack)}px vertical")
             oversized_containers.append(
                 {
                     "containerId": container_id,
-                    "containerWidth": round(container.rect.width),
-                    "containerHeight": round(container.rect.height),
-                    "requiredWidth": required_width,
-                    "requiredHeight": required_height,
+                    "containerWidth": round(crect.width),
+                    "containerHeight": round(crect.height),
+                    "contentWidth": round(content_right - content_left),
+                    "contentHeight": round(content_bottom - content_top),
                     "detail": (
-                        f"Container '{container_id}' is {round(container.rect.width)}x{round(container.rect.height)} "
-                        f"but its text needs only ~{required_width}x{required_height}; shrink the box or the empty space reads as a mistake."
+                        f"Container '{container_id}' ({round(crect.width)}x{round(crect.height)}) leaves "
+                        f"{' and '.join(axes)} empty space around its content; size it to the content plus one padding."
+                    ),
+                }
+            )
+
+        # Cramped: a side padded to less than the minimum, but not overflowing
+        # (negative padding is overflow, already reported by text_overflows).
+        # Judged against cramp_rects so a box hugging its own bound label is exempt.
+        tight_sides: list[str] = []
+        if cramp_rects:
+            cramp_left = min(rect.left for rect in cramp_rects)
+            cramp_right = max(rect.right for rect in cramp_rects)
+            cramp_top = min(rect.top for rect in cramp_rects)
+            cramp_bottom = max(rect.bottom for rect in cramp_rects)
+            pad_left = cramp_left - crect.left
+            pad_right = crect.right - cramp_right
+            pad_top = cramp_top - crect.top
+            pad_bottom = crect.bottom - cramp_bottom
+            tight_sides = [
+                name
+                for name, value in (
+                    ("left", pad_left),
+                    ("right", pad_right),
+                    ("top", pad_top),
+                    ("bottom", pad_bottom),
+                )
+                if 0.0 <= value < min_padding
+            ]
+        if tight_sides:
+            cramped_containers.append(
+                {
+                    "containerId": container_id,
+                    "sides": tight_sides,
+                    "minPadding": round(min_padding),
+                    "detail": (
+                        f"Content in '{container_id}' is within {round(min_padding)}px of the "
+                        f"{', '.join(tight_sides)} edge(s); add consistent padding so it does not look cramped."
                     ),
                 }
             )
@@ -1281,5 +1361,6 @@ def analyze_excalidraw(
         "overlaps": overlaps,
         "arrow_issues": arrow_issues,
         "oversized_containers": oversized_containers,
+        "cramped_containers": cramped_containers,
         "grouping_issues": grouping_issues,
     }

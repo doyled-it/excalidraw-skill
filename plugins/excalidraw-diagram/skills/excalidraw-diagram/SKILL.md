@@ -142,7 +142,7 @@ Use the Python helpers in `references/geometry.py` for exact text measurement, w
 
 Minimum validation rules for deterministic mode:
 - Text must fit inside its containing box with padding — for bound AND free-floating text (preflight checks both; see Text Sizing and Wrapping).
-- Boxes must be sized to their text, not far larger (no wasted empty space; preflight flags `oversized_containers`).
+- Boxes must hug their contents with one consistent padding — not far larger (preflight flags `oversized_containers`) and not pressed tight against an edge (preflight flags `cramped_containers`).
 - Panels that enclose child boxes or labels must share a `groupId` with them (preflight flags `grouping_issues`; see Grouping).
 - Text overlap checks must be geometry-based and ownership-aware: derive rendered text bounds using the same font metrics and wrapping model as the renderer, then test those rectangles against foreign shapes, foreign text, and connector lanes.
 - Boxes must not overlap.
@@ -240,12 +240,23 @@ The recipe for any text-in-a-box:
 Rules:
 - **Never insert manual `\n` to force line breaks in prose.** Widen the box or lower the `max_width` and let the text reflow. A hard `\n` is only acceptable when the break is semantically real (a deliberate two-line title, a code block with real newlines).
 - **The box is sized from the text, not the other way around.** A box far bigger than its text is wasted space; a box smaller than its text overflows and runs over its own borders. Both are preflight failures (`oversized_containers`, `text_overflows`).
-- **One padding value everywhere.** Don't hand-tune per-box padding; consistent padding is what makes boxes look aligned.
+- **One padding value on all four sides.** Don't hand-tune per-box padding; consistent padding is what makes boxes look aligned. Don't fit tight on one axis while leaving a gutter on another — that reads as cramped (`cramped_containers`).
 - **`text` and `originalText` hold the same natural string.** For container-bound text, the app re-wraps to the box width on open — a hardcoded `\n` fights that and renders wrong.
+
+### Size containers to their contents, not to the canvas
+
+A container's size comes from the bounding box of *everything it holds* — child boxes, chips, labels — plus one padding. This applies to panels and rows too, not just leaf label boxes.
+
+- **Don't stretch a box to the section/canvas width just to fill it.** A full-width row with its content crammed on the left leaves a dead gutter on the right. Size the box to where the content actually ends.
+- **For a column of rows (a table/matrix), give every row the SAME width — the width of the widest row's content plus padding — not the diagram width.** Equal widths keep the column aligned without a right-side gutter. If content genuinely varies, either wrap it to the shared width or let the shared width follow the widest real content.
+- **Balance padding top and bottom.** "Not enough space below the text" comes from sizing height tight to the text on the bottom while the top has room. Use equal vertical padding; a code chip or label should not touch the box's bottom edge.
+- Preflight enforces this: `oversized_containers` fires on a large empty gutter (content bbox much smaller than the box), `cramped_containers` fires when content sits within a few px of an edge.
 
 Red flags:
 - A `text` value containing `\n` that isn't a genuine paragraph or code newline.
-- A box whose height is more than ~2x the text it holds.
+- A box whose height is more than ~2x the text it holds, or a wide box with content bunched on one side.
+- A row stretched to the full diagram width with a large empty area to the right of its content.
+- Text or a chip sitting flush against the top/bottom edge of its box.
 - Text that visibly extends past the box edge in the render.
 
 ## Grouping

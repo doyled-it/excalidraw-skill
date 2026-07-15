@@ -157,6 +157,96 @@ class GeometryPreflightTests(unittest.TestCase):
         oversized = {item["containerId"] for item in report["oversized_containers"]}
         self.assertIn("roomy", oversized)
 
+    def test_oversized_flagged_even_when_panel_holds_a_child_shape(self) -> None:
+        # Full-width row: content (a chip) crammed on the left, big empty gutter
+        # on the right. The old check skipped any panel enclosing a child shape.
+        elements = [
+            {"id": "row", "type": "rectangle", "x": 0, "y": 0, "width": 1000, "height": 80},
+            {"id": "chip", "type": "rectangle", "x": 20, "y": 25, "width": 220, "height": 30},
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        oversized = {item["containerId"] for item in report["oversized_containers"]}
+        self.assertIn("row", oversized)
+
+    def test_cramped_flagged_when_padding_below_text_too_small(self) -> None:
+        elements = [
+            {"id": "box", "type": "rectangle", "x": 0, "y": 0, "width": 120, "height": 40},
+            {
+                "id": "lbl",
+                "type": "text",
+                "x": 20,
+                "y": 16,
+                "width": 40,
+                "height": 20,
+                "text": "Hi",
+                "fontSize": 16,
+                "fontFamily": 3,
+                "lineHeight": 1.25,
+            },
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        cramped = {item["containerId"] for item in report["cramped_containers"]}
+        self.assertIn("box", cramped)
+
+    def test_well_proportioned_box_is_clean(self) -> None:
+        measurement = geometry.measure_text_block("Hello world", 3, 16, padding_x=0, padding_y=0)
+        pad = 12
+        elements = [
+            {
+                "id": "box",
+                "type": "rectangle",
+                "x": 0,
+                "y": 0,
+                "width": measurement.text_width + pad * 2,
+                "height": measurement.text_height + pad * 2,
+            },
+            {
+                "id": "lbl",
+                "type": "text",
+                "x": pad,
+                "y": pad,
+                "width": measurement.text_width,
+                "height": measurement.text_height,
+                "text": "Hello world",
+                "fontSize": 16,
+                "fontFamily": 3,
+                "lineHeight": 1.25,
+            },
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        self.assertEqual(report["oversized_containers"], [])
+        self.assertEqual(report["cramped_containers"], [])
+
+    def test_snug_chip_hugging_its_own_label_is_not_cramped(self) -> None:
+        # A pill/chip that tightly wraps its own bound label is correct, not cramped.
+        measurement = geometry.measure_text_block("inflate", 3, 12, padding_x=0, padding_y=0)
+        elements = [
+            {
+                "id": "chip",
+                "type": "rectangle",
+                "x": 0,
+                "y": 0,
+                "width": measurement.text_width + 8,
+                "height": measurement.text_height + 8,
+            },
+            {
+                "id": "chiptext",
+                "type": "text",
+                "x": 4,
+                "y": 4,
+                "width": measurement.text_width,
+                "height": measurement.text_height,
+                "text": "inflate",
+                "fontSize": 12,
+                "fontFamily": 3,
+                "lineHeight": 1.25,
+                "containerId": "chip",
+            },
+        ]
+        report = geometry.analyze_excalidraw(elements)
+        cramped = {item["containerId"] for item in report["cramped_containers"]}
+        self.assertNotIn("chip", cramped)
+
     def test_grouping_issue_flagged_for_ungrouped_cluster(self) -> None:
         elements = [
             {"id": "panel", "type": "rectangle", "x": 0, "y": 0, "width": 300, "height": 200, "groupIds": []},

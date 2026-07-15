@@ -44,6 +44,7 @@ def main() -> None:
         + len(report["overlaps"])
         + len(report["arrow_issues"])
         + len(report.get("oversized_containers", []))
+        + len(report.get("cramped_containers", []))
         + len(report.get("grouping_issues", []))
     )
 
@@ -87,6 +88,10 @@ def main() -> None:
         print(f"oversized_containers={len(report.get('oversized_containers', []))}")
         for item in report.get("oversized_containers", []):
             print(f"  oversized: container={item['containerId']} detail={item['detail']}")
+
+        print(f"cramped_containers={len(report.get('cramped_containers', []))}")
+        for item in report.get("cramped_containers", []):
+            print(f"  cramped: container={item['containerId']} detail={item['detail']}")
 
         print(f"grouping_issues={len(report.get('grouping_issues', []))}")
         for item in report.get("grouping_issues", []):
