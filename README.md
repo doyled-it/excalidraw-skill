@@ -1,7 +1,6 @@
 # excalidraw-skill
 
-An agent skill for generating **editable `.excalidraw` diagrams that argue visually** —
-not rendered images, and not boxes with labels. It ships with a deterministic layout
+An agent skill for generating **editable `.excalidraw` diagrams that argue visually** (not rendered images, and not boxes with labels). It ships with a deterministic layout
 toolkit (text measurement, container sizing, orthogonal arrow routing, and geometry
 preflight) so diagrams come out clean on the first pass instead of after rounds of
 coordinate nudging.
@@ -14,7 +13,7 @@ in [Excalidraw](https://excalidraw.com) (web app) or the Obsidian Excalidraw plu
 
 - **Structure carries the argument.** Fan-out for one-to-many, timelines for sequences,
   convergence for aggregation, section boundaries for distinct phases. It runs an
-  isomorphism test — *if all the text disappeared, would the layout still communicate the
+  isomorphism test: *if all the text disappeared, would the layout still communicate the
   idea?*
 - **Concrete over generic.** Technical diagrams use real event names, payloads, and API
   calls as evidence artifacts, not placeholder boxes.
@@ -22,7 +21,7 @@ in [Excalidraw](https://excalidraw.com) (web app) or the Obsidian Excalidraw plu
   measured text and routed with a geometry helper, then run through a mechanical preflight
   (overflow, overlap, clipping, connector sanity) before anything renders.
 - **The `.excalidraw` is the deliverable.** A PNG is only ever produced for validation in
-  a temp dir, and is **never** written next to the source unless you explicitly ask — a
+  a temp dir, and is **never** written next to the source unless you explicitly ask. A
   co-located PNG just goes stale on the next edit.
 
 ## Install
@@ -72,7 +71,7 @@ ln -s "$PWD/excalidraw-skill/plugins/excalidraw-diagram/skills/excalidraw-diagra
 
 ### Any other agent
 
-Any tool that loads skills from a directory works the same way — symlink (or copy) the
+Any tool that loads skills from a directory works the same way: symlink (or copy) the
 skill directory into wherever that tool discovers skills:
 
 ```bash
@@ -124,9 +123,9 @@ plugins/excalidraw-diagram/
 
 > **Packaging note:** in a `.claude-plugin` marketplace, each plugin's `source` must point
 > at a **subdirectory** (`"./plugins/excalidraw-diagram"`), not the repo root (`"./"`).
-> Codex reports "plugin not found in marketplace" for a root-level source — hence the
+> Codex reports "plugin not found in marketplace" for a root-level source. Hence the
 > `plugins/<name>/` layout here.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
